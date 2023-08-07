@@ -158,6 +158,13 @@ func expandVariable(sb *strings.Builder, op byte, first bool, data reflect.Value
 	return false, nil
 }
 
+var keyStringPool = sync.Pool{
+	New: func() any {
+		v := reflect.New(stringType)
+		return &v
+	},
+}
+
 func lookupKey(composite reflect.Value, key string) reflect.Value {
 	if !composite.IsValid() {
 		return reflect.Value{}
@@ -178,7 +185,18 @@ func lookupKey(composite reflect.Value, key string) reflect.Value {
 		if keyType.Kind() != reflect.String {
 			return reflect.Value{}
 		}
-		return composite.MapIndex(reflect.ValueOf(key).Convert(keyType))
+		keyReflectPtrValue := keyStringPool.Get().(*reflect.Value)
+		keyReflectValue := keyReflectPtrValue.Elem()
+		keyReflectValue.SetString(key)
+		var result reflect.Value
+		if keyType == stringType {
+			result = composite.MapIndex(keyReflectValue)
+		} else {
+			result = composite.MapIndex(keyReflectValue.Convert(keyType))
+		}
+		keyReflectValue.SetString("")
+		keyStringPool.Put(keyReflectPtrValue)
+		return result
 	case reflect.Struct:
 		sd := describeStruct(composite.Type())
 		i, ok := sd.indexLookup[key]
@@ -232,12 +250,16 @@ func opSep(op byte) byte {
 }
 
 func coerceString(val reflect.Value) (string, error) {
-	switch {
-	case !val.IsValid():
+	if !val.IsValid() {
 		return "", errors.New("undefined value")
-	case val.Type().Implements(textMarshalerType):
+	}
+	typ := val.Type()
+	switch {
+	case typ.Implements(textMarshalerType):
 		data, err := val.Interface().(encoding.TextMarshaler).MarshalText()
 		return string(data), err
+	case typ.Kind() == reflect.String && !(typ.Implements(stringerType) || typ.Implements(errorType) || typ.Implements(formatterType)):
+		return val.String(), nil
 	default:
 		return fmt.Sprint(val), nil
 	}
@@ -429,8 +451,9 @@ func describeStruct(t reflect.Type) structDescriptor {
 }
 
 var (
-	textMarshalerType = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
-	formatterType     = reflect.TypeOf((*fmt.Formatter)(nil)).Elem()
-	stringerType      = reflect.TypeOf((*fmt.Stringer)(nil)).Elem()
 	errorType         = reflect.TypeOf((*error)(nil)).Elem()
+	formatterType     = reflect.TypeOf((*fmt.Formatter)(nil)).Elem()
+	stringType        = reflect.TypeOf((*string)(nil)).Elem()
+	stringerType      = reflect.TypeOf((*fmt.Stringer)(nil)).Elem()
+	textMarshalerType = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
 )

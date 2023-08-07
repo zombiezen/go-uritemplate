@@ -27,6 +27,7 @@ import (
 
 func Expand(template string, data any) (string, error) {
 	sb := new(strings.Builder)
+	sb.Grow(len(template))
 	dataValue := reflect.ValueOf(data)
 	var firstError error
 	for i := 0; i < len(template); {

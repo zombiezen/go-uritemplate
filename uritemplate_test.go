@@ -594,6 +594,13 @@ func BenchmarkExpand(b *testing.B) {
 		}
 	})
 
+	b.Run("SimpleStructData", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			Expand("{var}", struct{ Var string }{"value"})
+		}
+	})
+
 	b.Run("Complex", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
