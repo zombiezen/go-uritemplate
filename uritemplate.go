@@ -14,6 +14,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+// Package uritemplate provides a function to expand variables
+// in URI Templates as specified by RFC 6570.
+// This package provides a Level 4 template processor.
 package uritemplate
 
 import (
@@ -25,6 +28,33 @@ import (
 	"unicode/utf8"
 )
 
+// Expand expands variables in the given URI template.
+// The data argument is a map with string keys,
+// a struct, or a pointer to either of these.
+// Variable values are interpreted as follows:
+//
+//  1. If the value implements [encoding.TextMarshaler],
+//     then the value's MarshalText method will be called
+//     and the result is used as a string.
+//  2. If the value implements [fmt.Stringer] or [fmt.Formatter],
+//     then [fmt.Sprint] will be called on the value
+//     and the result is used as a string.
+//  3. If the value is a slice or an array,
+//     then the value will be treated as a value list.
+//  4. If the value is a map or a struct,
+//     then the value will be treated as an associative array.
+//  5. Otherwise, [fmt.Sprint] will be called on the value
+//     and the result is used as a string.
+//
+// # Structs
+//
+// Go structs are used as ordered associative arrays
+// where each exported field is a (name, value) pair.
+// Without a tag, a field's pair name will be the same as the field's name
+// with the first letter lowercased.
+// The pair name can be overridden with a "uritemplate" field tag
+// or the field can be ignored entirely with `uritemplate:"-"`.
+// An embedded field is treated the same as other fields.
 func Expand(template string, data any) (string, error) {
 	sb := new(strings.Builder)
 	sb.Grow(len(template))
