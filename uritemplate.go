@@ -68,12 +68,11 @@ func expandExpression(sb *strings.Builder, expr string, data reflect.Value) (exp
 		return len(expr), errors.New("unterminated expression")
 	}
 	exprLen = end + 1
-	expr = expr[:end]
-	expr = strings.TrimPrefix(expr, "{")
+	rest := strings.TrimPrefix(expr[:end], "{")
 
 	var op byte
-	rest := expr
-	if len(rest) > 0 && strings.IndexByte("+#./;?&=,!@|", rest[0]) != -1 {
+	const reservedOps = "=,!@|"
+	if len(rest) > 0 && strings.IndexByte("+#./;?&"+reservedOps, rest[0]) != -1 {
 		op = rest[0]
 		rest = rest[1:]
 	}
@@ -81,6 +80,10 @@ func expandExpression(sb *strings.Builder, expr string, data reflect.Value) (exp
 	if rest == "" {
 		sb.WriteString(expr[:exprLen])
 		return exprLen, errors.New("empty expression")
+	}
+	if strings.IndexByte(reservedOps, op) != -1 {
+		sb.WriteString(expr[:exprLen])
+		return exprLen, fmt.Errorf("expression %q: unknown operator %q", expr, op)
 	}
 	varName, modifier, rest := cutVarSpec(rest)
 	if varName == "" {

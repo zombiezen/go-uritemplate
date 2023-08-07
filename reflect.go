@@ -24,6 +24,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -95,6 +96,7 @@ func expandVariable(sb *strings.Builder, op byte, first bool, data reflect.Value
 				writeValue(sb, op, k)
 				sb.WriteByte(',')
 				writeValue(sb, op, s)
+				defined = true
 				return true
 			})
 			if err != nil {
@@ -169,6 +171,7 @@ func lookupKey(composite reflect.Value, key string) reflect.Value {
 		}
 		composite = composite.Elem()
 	}
+
 	switch composite.Kind() {
 	case reflect.Map:
 		keyType := composite.Type().Key()
@@ -176,6 +179,13 @@ func lookupKey(composite reflect.Value, key string) reflect.Value {
 			return reflect.Value{}
 		}
 		return composite.MapIndex(reflect.ValueOf(key).Convert(keyType))
+	case reflect.Struct:
+		sd := describeStruct(composite.Type())
+		i, ok := sd.indexLookup[key]
+		if !ok {
+			return reflect.Value{}
+		}
+		return composite.Field(i)
 	default:
 		return reflect.Value{}
 	}
@@ -323,7 +333,7 @@ func kindOf(v reflect.Value) (varKind, reflect.Value) {
 	switch {
 	case !v.IsValid():
 		return 0, reflect.Value{}
-	case !scalar && v.Kind() == reflect.Map && v.Type().Key().Kind() == reflect.String:
+	case !scalar && ((v.Kind() == reflect.Map && v.Type().Key().Kind() == reflect.String) || v.Kind() == reflect.Struct):
 		return mapKind, v
 	case !scalar && (v.Kind() == reflect.Slice || v.Kind() == reflect.Array):
 		return listKind, v
@@ -354,17 +364,68 @@ func followIndirection(v reflect.Value) (_ reflect.Value, scalar bool) {
 }
 
 func iterateMap(m reflect.Value, f func(k string, v reflect.Value) bool) {
-	keys := m.MapKeys()
-	// For mapKind, keys are guaranteed to have an underlying type of string.
-	sort.Slice(keys, func(i, j int) bool {
-		return keys[i].String() < keys[j].String()
-	})
+	switch m.Kind() {
+	case reflect.Map:
+		keys := m.MapKeys()
+		// For mapKind, keys are guaranteed to have an underlying type of string.
+		sort.Slice(keys, func(i, j int) bool {
+			return keys[i].String() < keys[j].String()
+		})
 
-	for _, k := range keys {
-		if !f(k.String(), m.MapIndex(k)) {
-			break
+		for _, k := range keys {
+			if !f(k.String(), m.MapIndex(k)) {
+				break
+			}
 		}
+	case reflect.Struct:
+		sd := describeStruct(m.Type())
+		for i, name := range sd.fieldNames {
+			if name == "" {
+				continue
+			}
+			if !f(name, m.Field(i)) {
+				break
+			}
+		}
+	default:
+		panic("unreachable")
 	}
+}
+
+var descriptors sync.Map
+
+type structDescriptor struct {
+	fieldNames  []string
+	indexLookup map[string]int
+}
+
+func describeStruct(t reflect.Type) structDescriptor {
+	if sd, ok := descriptors.Load(t); ok {
+		return sd.(structDescriptor)
+	}
+	sd := structDescriptor{
+		fieldNames:  make([]string, t.NumField()),
+		indexLookup: make(map[string]int),
+	}
+	for i := range sd.fieldNames {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		var fieldName string
+		if tag := field.Tag.Get("uritemplate"); tag == "-" {
+			continue
+		} else if tag != "" {
+			fieldName = tag
+		} else {
+			_, firstRuneSize := utf8.DecodeRuneInString(field.Name)
+			fieldName = strings.ToLower(field.Name[:firstRuneSize]) + field.Name[firstRuneSize:]
+		}
+		sd.fieldNames[i] = fieldName
+		sd.indexLookup[fieldName] = i
+	}
+	descriptors.Store(t, sd)
+	return sd
 }
 
 var (
